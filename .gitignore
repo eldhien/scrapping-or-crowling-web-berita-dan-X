@@ -1,0 +1,6 @@
+# rahasia
+.env
+
+# data hasil scraping & log
+hasil/
+__pycache__/
