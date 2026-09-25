@@ -1,0 +1,7 @@
+# Web hanya bisa diakses dari laptop ini (auth token X dimasukkan lewat web, jangan dibuka ke jaringan)
+[server]
+address = "localhost"
+headless = true
+
+[browser]
+gatherUsageStats = false
