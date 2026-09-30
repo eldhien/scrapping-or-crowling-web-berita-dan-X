@@ -5,9 +5,9 @@ import sys
 from datetime import date, timedelta
 
 from scraper import twitter
-from scraper.storage import OUTPUT_DIR, RAW_TWEET_DIR, env_token, load_existing, merge_and_save
+from scraper.storage import OUTPUT_DIR, RAW_TWEET_DIR, env_token, load_existing, merge_and_save, safe_filename
 
-# nama kejadian -> keyword pencarian (digabung OR)
+# topik bawaan CLI: nama -> keyword pencarian (digabung OR). Topik lain lewat --kejadian NAMA --keyword ...
 EVENTS = {
     "Gempa": ["gempa"],
     "Banjir": ["banjir"],
@@ -18,7 +18,7 @@ BUFFER = 1.3  # ambil lebih banyak dari target karena retweet/duplikat dibuang
 
 
 def out_path(event, fmt):
-    return OUTPUT_DIR / f"data_tweet{event}.{fmt}"
+    return OUTPUT_DIR / f"data_tweet{safe_filename(event, 'topik')}.{fmt}"
 
 
 def count_rows(event, fmt):
@@ -78,7 +78,9 @@ def load_progress():
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--mode", choices=["terbaru", "bulanan"], default="terbaru")
-    ap.add_argument("--kejadian", default=",".join(EVENTS), help=f"pilihan: {', '.join(EVENTS)}")
+    ap.add_argument("--kejadian", default=",".join(EVENTS),
+                    help=f"nama topik (bawaan: {', '.join(EVENTS)}); nama lain = topik baru, keyword dari --keyword")
+    ap.add_argument("--keyword", default="", help="keyword (dipisah koma) untuk topik di luar bawaan")
     ap.add_argument("--target", type=int, default=2000, help="target jumlah data per kejadian")
     ap.add_argument("--tahun", type=int, default=5, help="mode bulanan: berapa tahun ke belakang")
     ap.add_argument("--metode-tanggal", default="date", choices=["date", "time", "id"],
@@ -90,10 +92,10 @@ def main():
     token = env_token()
     if not token:
         sys.exit("X_AUTH_TOKEN kosong. Isi token di file .env terlebih dahulu.")
-    events = [e.strip().capitalize() for e in args.kejadian.split(",") if e.strip()]
-    unknown = [e for e in events if e not in EVENTS]
-    if unknown:
-        sys.exit(f"Kejadian tidak dikenal: {unknown}. Pilihan: {list(EVENTS)}")
+    events = [e.strip() for e in args.kejadian.split(",") if e.strip()]
+    extra_kw = [k.strip() for k in args.keyword.split(",") if k.strip()]
+    for e in events:
+        EVENTS.setdefault(e, EVENTS.get(e.capitalize()) or extra_kw or [e])
 
     if args.mode == "terbaru":
         for event in events:

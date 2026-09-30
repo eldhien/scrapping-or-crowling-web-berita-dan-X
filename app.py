@@ -1,4 +1,4 @@
-"""Web scraping data bencana (Detik, Kompas, BMKG, dan tweet X) untuk data penelitian.
+"""Web scraping data berita (Detik, Kompas, BMKG) dan tweet X untuk data penelitian.
 
 Jalankan:  streamlit run app.py
 """
@@ -10,10 +10,10 @@ from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
-from kumpul_per_kejadian import EVENTS, PROGRESS_FILE, count_rows, load_progress, months_back, out_path, run_once
+from kumpul_per_kejadian import PROGRESS_FILE, count_rows, load_progress, months_back, out_path, run_once
 from scraper import detik, twitter
 from scraper.runner import COLUMNS, run
-from scraper.storage import OUTPUT_DIR, RAW_TWEET_DIR, env_token, merge_and_save, safe_filename, save
+from scraper.storage import OUTPUT_DIR, RAW_TWEET_DIR, env_token, load_existing, merge_and_save, safe_filename, save
 
 
 def valid_range(rentang):
@@ -56,9 +56,9 @@ def tab_berita():
             rentang = st.date_input("2. Rentang waktu", value=(today - timedelta(days=3), today),
                                     max_value=today, format="DD/MM/YYYY")
         with c2:
-            keywords = st.text_input("3. Keyword (pisahkan dengan koma)", value="gempa, banjir, longsor",
+            keywords = st.text_input("3. Keyword (pisahkan dengan koma)", value="", placeholder="contoh: pemilu, pilpres",
                                      help="Dicocokkan ke judul (dan ringkasan Detik). Kosongkan untuk mengambil semua.")
-            nama_file = st.text_input("4. Nama file", value="data_bencana")
+            nama_file = st.text_input("4. Nama file", value="data_berita")
             fmt = st.selectbox("Format file", ["csv", "xlsx", "json"])
 
         with st.expander("Pengaturan lanjutan"):
@@ -135,7 +135,7 @@ def tab_tweet():
                                         max_value=today, format="DD/MM/YYYY", key="rentang_tweet")
             else:
                 uploaded = st.file_uploader("File CSV dari tweet-harvest", type=["csv"])
-            keywords = st.text_input("Keyword (pisahkan dengan koma)", value="gempa, banjir, longsor",
+            keywords = st.text_input("Keyword (pisahkan dengan koma)", value="", placeholder="contoh: pemilu, pilpres",
                                      key="kw_tweet",
                                      help="Mode langsung: dipakai sebagai query pencarian X (digabung OR). "
                                           "Mode upload: dipakai untuk menyaring tweet.")
@@ -244,15 +244,17 @@ def tab_tweet():
     show_result(records, out_path, fmt, key="dl_tweet", append=append)
 
 
-# ============================================================================ tab per kejadian
+# ============================================================================ tab per topik
 def tab_kejadian():
-    st.caption("Mengumpulkan tweet ke file terpisah per kejadian: " +
-               ", ".join(f"`{out_path(e, 'csv').name}`" for e in EVENTS))
+    st.caption("Mengumpulkan tweet ke file terpisah per topik. Nama topik yang Anda isi menjadi nama file: "
+               "`data_tweet<NamaTopik>.csv`. Menjalankan ulang dengan nama yang sama akan menambah data ke file itu.")
 
-    counts = {e: count_rows(e, "csv") for e in EVENTS}
-    st.write("**Data yang sudah terkumpul saat ini:**")
-    st.dataframe(pd.DataFrame({"kejadian": counts.keys(), "jumlah_data": counts.values()}),
-                width="stretch", hide_index=True)
+    existing = sorted(OUTPUT_DIR.glob("data_tweet*.csv"))
+    if existing:
+        st.write("**File topik yang sudah ada:**")
+        st.dataframe(pd.DataFrame({"file": [p.name for p in existing],
+                                   "jumlah_data": [len(load_existing(p, "csv")) for p in existing]}),
+                     width="stretch", hide_index=True)
 
     # Radio mode ditaruh DI LUAR form: form baru render ulang saat submit, jadi kalau radio ini
     # ada di dalam form, field "tahun"/"metode tanggal" (khusus mode bulanan) tidak akan sempat
@@ -272,8 +274,12 @@ def tab_kejadian():
                 help="Cookie `auth_token` dari x.com. Bisa juga disimpan di file .env sebagai X_AUTH_TOKEN=...")
             if saved_token:
                 st.caption("✅ Token dari file .env terdeteksi.")
-            kejadian = st.multiselect("Kejadian", list(EVENTS), default=list(EVENTS))
-            target = st.number_input("Target jumlah data per kejadian", 100, 50000, 2000, step=100)
+            topik = st.text_input("Nama topik / file", placeholder="contoh: Pemilu, Banjir, Harga_BBM",
+                                  help="Menjadi nama file hasil: data_tweet<NamaTopik>.csv")
+            keywords = st.text_input("Keyword (pisahkan dengan koma)", key="kw_kejadian",
+                                     placeholder="contoh: pemilu, pilpres",
+                                     help="Digabung dengan OR di pencarian X. Kosong = pakai nama topik.")
+            target = st.number_input("Target jumlah data", 100, 50000, 2000, step=100)
         with c2:
             if mode == "bulanan":
                 tahun = st.number_input("Berapa tahun ke belakang", 1, 10, 5)
@@ -290,11 +296,14 @@ def tab_kejadian():
     if not token:
         st.error("Masukkan auth token X, atau isi X_AUTH_TOKEN di file .env.")
         return
-    if not kejadian:
-        st.error("Pilih minimal satu kejadian.")
+    if not topik.strip():
+        st.error("Isi nama topik.")
         return
+    event = safe_filename(topik, "topik")
+    kw_list = [k.strip() for k in keywords.split(",") if k.strip()] or [topik.strip()]
     lang_code = "" if lang == "semua" else lang
     fmt = "csv"
+    st.write(f"**Topik:** {event} · **Keyword:** {', '.join(kw_list)} · **File:** `{out_path(event, fmt).name}`")
 
     if mode == "bulanan":
         st.info("Sebelum lanjut: cek dulu di kotak pencarian x.com apakah query dengan filter tanggal "
@@ -303,96 +312,78 @@ def tab_kejadian():
         per_run = math.ceil(target * 1.3 / len(months))
         date_mode = twitter.DATE_MODES[date_mode_label]
         progress = load_progress()
-    else:
-        months = None
 
     overall = st.progress(0.0)
     status = st.empty()
     log_box = st.empty()
     summary = st.container()
 
-    total_steps = len(kejadian) * (len(months) if months else 1)
-    step = 0
-    empty_streak = 0
-
-    for event in kejadian:
-        if mode == "terbaru":
-            have = count_rows(event, fmt)
-            if have >= target:
-                status.text(f"[{event}] sudah {have} data (target {target}), dilewati.")
-                step += 1
-                overall.progress(step / total_steps)
-                continue
+    if mode == "terbaru":
+        have = count_rows(event, fmt)
+        if have >= target:
+            status.text(f"[{event}] sudah {have} data (target {target}), dilewati.")
+        else:
             limit = math.ceil((target - have) * 1.3)
-            raw_name = f"raw_{event}_terbaru"
             log = deque(maxlen=12)
             n_new = 0
-            for item in run_once(token, event, EVENTS[event], lang_code, limit, date.today(), date.today(),
-                                 "none", raw_name, fmt):
+            for item in run_once(token, event, kw_list, lang_code, limit, date.today(), date.today(),
+                                 "none", f"raw_{event}_terbaru", fmt):
                 if item[0] == "log":
                     log.append(item[1])
                     log_box.code("\n".join(log))
                 else:
                     n_new = item[1]
-            step += 1
-            overall.progress(step / total_steps)
             status.text(f"[{event}] +{n_new} baru, total {count_rows(event, fmt)}")
+        overall.progress(1.0)
 
-        else:  # bulanan
-            done = set(progress.get(event, []))
-            for start, end in months:
-                key = f"{start:%Y-%m}"
-                step += 1
-                if key in done:
-                    overall.progress(step / total_steps)
-                    continue
-                status.text(f"[{event} {key}] mengambil ±{per_run} tweet...")
-                raw_name = f"raw_{event}_{start:%Y%m}"
-                log = deque(maxlen=12)
-                n_new = 0
-                for item in run_once(token, event, EVENTS[event], lang_code, per_run, start, end,
-                                     date_mode, raw_name, fmt):
-                    if item[0] == "log":
-                        log.append(item[1])
-                        log_box.code("\n".join(log))
-                    else:
-                        n_new = item[1]
-                overall.progress(step / total_steps)
-                empty_streak = empty_streak + 1 if n_new == 0 else 0
-                if n_new > 0:
-                    done.add(key)
-                    progress[event] = sorted(done)
-                    PROGRESS_FILE.write_text(json.dumps(progress, indent=2), encoding="utf-8")
-                if empty_streak >= 3:
-                    st.error("3 bulan berturut-turut 0 tweet. Kemungkinan filter tanggal diblokir untuk akun "
-                            "ini atau kena rate limit. Bulan yang sudah selesai tidak akan diulang; "
-                            "jalankan lagi nanti untuk melanjutkan.")
-                    break
-            else:
-                status.text(f"[{event}] selesai: {count_rows(event, fmt)} data")
+    else:  # bulanan
+        done = set(progress.get(event, []))
+        empty_streak = 0
+        for step, (start, end) in enumerate(months, 1):
+            key = f"{start:%Y-%m}"
+            if key in done:
+                overall.progress(step / len(months))
                 continue
-            break  # empty_streak break di loop dalam -> hentikan juga loop kejadian
+            status.text(f"[{event} {key}] mengambil ±{per_run} tweet...")
+            raw_name = f"raw_{event}_{start:%Y%m}"
+            log = deque(maxlen=12)
+            n_new = 0
+            for item in run_once(token, event, kw_list, lang_code, per_run, start, end,
+                                 date_mode, raw_name, fmt):
+                if item[0] == "log":
+                    log.append(item[1])
+                    log_box.code("\n".join(log))
+                else:
+                    n_new = item[1]
+            overall.progress(step / len(months))
+            empty_streak = empty_streak + 1 if n_new == 0 else 0
+            if n_new > 0:
+                done.add(key)
+                progress[event] = sorted(done)
+                PROGRESS_FILE.write_text(json.dumps(progress, indent=2), encoding="utf-8")
+            if empty_streak >= 3:
+                st.error("3 bulan berturut-turut 0 tweet. Kemungkinan filter tanggal diblokir untuk akun "
+                         "ini atau kena rate limit. Bulan yang sudah selesai tidak akan diulang; "
+                         "jalankan lagi nanti untuk melanjutkan.")
+                break
 
     log_box.empty()
     status.empty()
     with summary:
-        st.success("Proses selesai.")
-        final = {e: count_rows(e, "csv") for e in kejadian}
-        df_final = pd.DataFrame({"kejadian": final.keys(), "jumlah_data": final.values()})
-        st.dataframe(df_final, width="stretch", hide_index=True)
-        for event in kejadian:
-            p = out_path(event, "csv")
-            if p.exists():
-                st.download_button(f"Unduh {p.name}", p.read_bytes(), file_name=p.name, key=f"dl_{event}")
+        p = out_path(event, fmt)
+        st.success(f"Proses selesai: {count_rows(event, fmt)} data di {p.name}")
+        if p.exists():
+            st.dataframe(load_existing(p, fmt).drop(columns=["isi_teks"]).tail(20), width="stretch")
+            st.download_button(f"Unduh {p.name}", p.read_bytes(), file_name=p.name, key=f"dl_{event}")
 
 
 # ============================================================================ halaman
-st.set_page_config(page_title="Scraper Data Bencana", page_icon="🌋", layout="wide")
-st.title("Scraper Data Bencana")
-st.caption("Kolom lokasi, jenis_bencana, label, dan tingkat_keparahan diisi otomatis berbasis aturan, "
-           "jadi validasi manual tetap diperlukan.")
+st.set_page_config(page_title="Scraper Data", page_icon="🔎", layout="wide")
+st.title("Scraper Data Berita & Tweet X")
+st.caption("Kolom lokasi, jenis_bencana, label, dan tingkat_keparahan diisi otomatis berbasis aturan "
+           "(hanya relevan untuk topik kebencanaan; abaikan untuk topik lain). Validasi manual tetap diperlukan.")
 
-tab1, tab2, tab3 = st.tabs(["📰 Berita (Detik, Kompas, BMKG)", "🐦 Tweet X", "📦 Tweet per Kejadian"])
+tab1, tab2, tab3 = st.tabs(["📰 Berita (Detik, Kompas, BMKG)", "🐦 Tweet X", "📦 Tweet per Topik"])
 with tab1:
     tab_berita()
 with tab2:
