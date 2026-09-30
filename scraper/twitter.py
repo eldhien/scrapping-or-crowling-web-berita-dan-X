@@ -11,28 +11,24 @@ from pathlib import Path
 
 import pandas as pd
 
-from .labeling import detect_jenis, detect_keparahan, detect_label, detect_lokasi
+from .labeling import detect_lokasi
 
 TWEET_HARVEST = "tweet-harvest@2.7.1"
 WIB = timezone(timedelta(hours=7))
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
-# Normalisasi bahasa informal khusus untuk pelabelan (isi_teks asli tidak diubah)
+# Normalisasi bahasa informal umum khusus untuk deteksi lokasi/keyword (isi_teks asli tidak diubah)
 SLANG = {
-    "bjir": "banjir", "banjr": "banjir", "bnjir": "banjir", "banjirr": "banjir", "bajir": "banjir",
-    "gmpa": "gempa", "gempaa": "gempa", "gempah": "gempa",
-    "lonsor": "longsor", "longsoor": "longsor", "longsr": "longsor", "lngsor": "longsor",
-    "rmh": "rumah", "rmhku": "rumah", "wrga": "warga", "korbn": "korban", "ngungsi": "mengungsi",
-    "kebanjiran": "banjir terendam", "kelelep": "terendam", "tenggelem": "terendam", "tenggelam": "terendam",
-    "bgt": "", "yg": "yang", "dg": "dengan", "dgn": "dengan", "gak": "tidak", "ga": "tidak", "nggak": "tidak",
+    "yg": "yang", "dg": "dengan", "dgn": "dengan", "gak": "tidak", "ga": "tidak", "nggak": "tidak",
     "enggak": "tidak", "gk": "tidak", "tdk": "tidak", "blm": "belum", "udh": "sudah", "udah": "sudah",
+    "bgt": "banget", "krn": "karena", "utk": "untuk", "sy": "saya",
 }
-_SLANG_RE = re.compile(r"\b(" + "|".join(map(re.escape, SLANG)) + r")\b", re.I)
+_SLANG_RE = re.compile(r"(" + "|".join(map(re.escape, SLANG)) + r")", re.I)
 _URL_RE = re.compile(r"https?://\S+")
 _MENTION_RE = re.compile(r"@\w+")
 
 
-def normalize_for_labeling(text):
+def normalize_text(text):
     text = _URL_RE.sub(" ", text)
     text = _MENTION_RE.sub(" ", text)
     text = text.replace("#", " ")
@@ -158,13 +154,10 @@ def process_csv(source, keywords=(), exclude_retweets=True, start=None, end=None
     records = []
     for _, row in df.iterrows():
         text = row[text_col].strip()
-        norm = normalize_for_labeling(text)
+        norm = normalize_text(text)
         hit = [k for k in keywords if k in norm.lower()] if keywords else ["(semua)"]
         if not hit:
             continue
-        jenis = detect_jenis("", norm)
-        # tweet pendek: cukup 1 kata konteks untuk dianggap kejadian bencana
-        label = detect_label("", norm, jenis, min_konteks=1)
         tanggal = _parse_date(row[date_col]) if date_col else ""
         if start and end and tanggal[:10] and not (f"{start}" <= tanggal[:10] <= f"{end}"):
             continue
@@ -177,9 +170,6 @@ def process_csv(source, keywords=(), exclude_retweets=True, start=None, end=None
             "judul": f"@{row[user_col]}" if user_col else "",
             "isi_teks": text,
             "lokasi": detect_lokasi("", norm),
-            "jenis_bencana": jenis,
-            "label": label,
-            "tingkat_keparahan": detect_keparahan("", norm, label),
             "keyword": ", ".join(hit),
             "url": url,
         })

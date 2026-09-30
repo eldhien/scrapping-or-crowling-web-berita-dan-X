@@ -34,13 +34,11 @@ def show_result(records, out_path, fmt, key, append=False):
     else:
         st.success(f"{len(df)} data tersimpan di: {out_path}")
 
-    s1, s2, s3 = st.columns(3)
+    s1, s2 = st.columns(2)
     s1.write("**Per sumber**")
     s1.dataframe(df["sumber"].value_counts())
-    s2.write("**Per jenis bencana**")
-    s2.dataframe(df["jenis_bencana"].value_counts())
-    s3.write("**Per label / keparahan**")
-    s3.dataframe(df.groupby(["label", "tingkat_keparahan"]).size().rename("jumlah"))
+    s2.write("**Per keyword**")
+    s2.dataframe(df["keyword"].value_counts())
     st.download_button("Unduh file", out_path.read_bytes(), file_name=out_path.name, key=key)
 
 
@@ -86,7 +84,7 @@ def tab_berita():
     if n_days > 31:
         st.warning(f"Rentang {n_days} hari akan memakan waktu lama. Pertimbangkan membaginya per bulan.")
     if "BMKG" in sources:
-        st.info("Feed publik BMKG hanya berisi ±15 gempa terbaru per feed. "
+        st.info("BMKG khusus data gempa; feed publiknya hanya berisi ±15 gempa terbaru per feed. "
                 "Data historis diminta lewat dataonline.bmkg.go.id.")
 
     out_path = OUTPUT_DIR / f"{safe_filename(nama_file)}.{fmt}"
@@ -380,8 +378,7 @@ def tab_kejadian():
 # ============================================================================ halaman
 st.set_page_config(page_title="Scraper Data", page_icon="🔎", layout="wide")
 st.title("Scraper Data Berita & Tweet X")
-st.caption("Kolom lokasi, jenis_bencana, label, dan tingkat_keparahan diisi otomatis berbasis aturan "
-           "(hanya relevan untuk topik kebencanaan; abaikan untuk topik lain). Validasi manual tetap diperlukan.")
+st.caption("Kolom lokasi diisi otomatis berbasis aturan, jadi validasi manual tetap diperlukan.")
 
 tab1, tab2, tab3 = st.tabs(["📰 Berita (Detik, Kompas, BMKG)", "🐦 Tweet X", "📦 Tweet per Topik"])
 with tab1:

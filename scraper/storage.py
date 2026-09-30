@@ -32,7 +32,7 @@ def env_token():
     return os.environ.get("X_AUTH_TOKEN", "").strip()
 
 
-def safe_filename(name, default="data_bencana"):
+def safe_filename(name, default="data"):
     name = re.sub(r"[^\w\-]+", "_", name.strip()).strip("_")
     return name or default
 
@@ -66,7 +66,7 @@ def merge_and_save(records, path, fmt, append=False):
     if append:
         old = load_existing(path, fmt)
         n_before = len(old)
-        df = pd.concat([old, df], ignore_index=True)
+        df = pd.concat([old, df], ignore_index=True).fillna("")
     df = df.drop_duplicates(subset=["url", "isi_teks"]).sort_values("tanggal").reset_index(drop=True)
     save(df, path, fmt)
     return df, len(df) - n_before

@@ -7,12 +7,8 @@ from datetime import date, timedelta
 from scraper import twitter
 from scraper.storage import OUTPUT_DIR, RAW_TWEET_DIR, env_token, load_existing, merge_and_save, safe_filename
 
-# topik bawaan CLI: nama -> keyword pencarian (digabung OR). Topik lain lewat --kejadian NAMA --keyword ...
-EVENTS = {
-    "Gempa": ["gempa"],
-    "Banjir": ["banjir"],
-    "Longsor": ["longsor", "tanah longsor"],
-}
+# topik -> keyword pencarian (digabung OR); diisi dari argumen CLI --topik / --keyword
+EVENTS = {}
 PROGRESS_FILE = OUTPUT_DIR / "progress_kumpul.json"
 BUFFER = 1.3  # ambil lebih banyak dari target karena retweet/duplikat dibuang
 
@@ -78,10 +74,10 @@ def load_progress():
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--mode", choices=["terbaru", "bulanan"], default="terbaru")
-    ap.add_argument("--kejadian", default=",".join(EVENTS),
-                    help=f"nama topik (bawaan: {', '.join(EVENTS)}); nama lain = topik baru, keyword dari --keyword")
-    ap.add_argument("--keyword", default="", help="keyword (dipisah koma) untuk topik di luar bawaan")
-    ap.add_argument("--target", type=int, default=2000, help="target jumlah data per kejadian")
+    ap.add_argument("--topik", required=True, help="nama topik = nama file hasil (data_tweet<Topik>); pisah koma "
+                    "untuk beberapa topik (semuanya memakai --keyword yang sama)")
+    ap.add_argument("--keyword", default="", help="keyword pencarian, dipisah koma (kosong = pakai nama topik)")
+    ap.add_argument("--target", type=int, default=2000, help="target jumlah data per topik")
     ap.add_argument("--tahun", type=int, default=5, help="mode bulanan: berapa tahun ke belakang")
     ap.add_argument("--metode-tanggal", default="date", choices=["date", "time", "id"],
                     help="mode bulanan: date=since/until, time=since_time/until_time, id=since_id/max_id")
@@ -92,10 +88,10 @@ def main():
     token = env_token()
     if not token:
         sys.exit("X_AUTH_TOKEN kosong. Isi token di file .env terlebih dahulu.")
-    events = [e.strip() for e in args.kejadian.split(",") if e.strip()]
+    events = [e.strip() for e in args.topik.split(",") if e.strip()]
     extra_kw = [k.strip() for k in args.keyword.split(",") if k.strip()]
     for e in events:
-        EVENTS.setdefault(e, EVENTS.get(e.capitalize()) or extra_kw or [e])
+        EVENTS[e] = extra_kw or [e]
 
     if args.mode == "terbaru":
         for event in events:

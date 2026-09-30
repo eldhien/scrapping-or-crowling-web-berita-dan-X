@@ -8,7 +8,7 @@ from scraper.storage import RAW_TWEET_DIR, OUTPUT_DIR, env_token, merge_and_save
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--keyword", default="survai elektabiltas gibran", help="dipisah koma (digabung OR)")
+    ap.add_argument("--keyword", default="", help="dipisah koma (digabung OR)")
     ap.add_argument("--hari", type=int, default=30, help="simpan tweet dari N hari terakhir (default 3)")
     ap.add_argument("--limit", type=int, default=10, help="maks. tweet per run")
     ap.add_argument("--nama", default="data_gibran", help="nama file hasil (tanpa ekstensi)")
