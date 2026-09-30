@@ -12,7 +12,6 @@ FEEDS = {
     "gempadirasakan": "https://data.bmkg.go.id/DataMKG/TEWS/gempadirasakan.json",
 }
 WIB = timezone(timedelta(hours=7))
-ROMAN = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6, "VII": 7, "VIII": 8, "IX": 9, "X": 10, "XI": 11, "XII": 12}
 
 
 def _lokasi(wilayah):
@@ -23,19 +22,6 @@ def _lokasi(wilayah):
     if place.isupper():
         place = ", ".join(p.strip().title() for p in place.split("-") if p.strip())
     return place.strip()
-
-
-def _max_mmi(dirasakan):
-    levels = [ROMAN[r] for r in re.findall(r"\b(XII|XI|X|IX|VIII|VII|VI|V|IV|III|II|I)\b", dirasakan or "")]
-    return max(levels, default=0)
-
-
-def _keparahan(magnitude, mmi):
-    if magnitude >= 6.5 or mmi >= 6:
-        return "tinggi"
-    if magnitude >= 5.5 or mmi >= 4:
-        return "sedang"
-    return "rendah"
 
 
 def fetch(fetcher, start, end):
@@ -58,7 +44,6 @@ def fetch(fetcher, start, end):
                 continue
             seen.add(key)
 
-            mag = float(g.get("Magnitude", 0) or 0)
             wilayah = g.get("Wilayah", "")
             dirasakan = g.get("Dirasakan", "")
             isi = (
@@ -77,9 +62,6 @@ def fetch(fetcher, start, end):
                 "judul": f"Gempa M {g.get('Magnitude')} - {wilayah}",
                 "isi_teks": isi,
                 "lokasi": _lokasi(wilayah),
-                "jenis_bencana": "gempa",
-                "label": "bencana",
-                "tingkat_keparahan": _keparahan(mag, _max_mmi(dirasakan)),
                 "url": url,
             })
     return records

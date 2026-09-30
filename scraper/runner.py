@@ -1,10 +1,9 @@
 """Orkestrasi scraping: menelusuri tiap sumber per tanggal dan menghasilkan event progres + record."""
 from . import bmkg, detik, kompas
 from .common import Fetcher, date_range, match_keywords
-from .labeling import enrich
+from .labeling import detect_lokasi
 
-COLUMNS = ["tanggal", "sumber", "judul", "isi_teks", "lokasi", "jenis_bencana", "label",
-           "tingkat_keparahan", "keyword", "url"]
+COLUMNS = ["tanggal", "sumber", "judul", "isi_teks", "lokasi", "keyword", "url"]
 
 
 def run(sources, start, end, keywords, detik_channels=("news",), max_pages=50, delay=1.0, max_articles=0):
@@ -61,7 +60,8 @@ def run(sources, start, end, keywords, detik_channels=("news",), max_pages=50, d
                 continue
             rec["keyword"] = ", ".join(hit)
             count += 1
-            yield ("record", enrich(rec))
+            rec["lokasi"] = detect_lokasi(rec["judul"], rec["isi_teks"])
+            yield ("record", rec)
             if limit_reached():
                 break
         done += 1
