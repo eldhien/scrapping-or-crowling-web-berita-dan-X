@@ -174,3 +174,55 @@ def process_csv(source, keywords=(), exclude_retweets=True, start=None, end=None
             "url": url,
         })
     return records
+
+
+# Format keluaran umum (tidak terikat topik apa pun): tidak ada kolom lokasi/label khusus.
+TWEET_COLUMNS = ["tanggal", "username", "isi_teks", "keyword", "suka", "retweet", "balasan", "url"]
+
+
+def process_csv_umum(source, keywords=(), exclude_retweets=True, start=None, end=None):
+    """Seperti process_csv, tetapi keluarannya berkolom TWEET_COLUMNS."""
+    try:
+        df = pd.read_csv(source, dtype=str).fillna("")
+    except pd.errors.EmptyDataError:
+        raise ValueError("File CSV kosong (0 tweet).")
+    text_col = _col(df, "full_text", "text", "tweet", "content")
+    if text_col is None:
+        raise ValueError(f"Kolom teks tweet tidak ditemukan. Kolom yang ada: {list(df.columns)}")
+    date_col = _col(df, "created_at", "date", "tanggal")
+    user_col = _col(df, "username", "user_screen_name", "screen_name")
+    url_col = _col(df, "tweet_url", "url")
+    id_col = _col(df, "id_str", "id", "tweet_id")
+    like_col = _col(df, "favorite_count", "like_count", "likes")
+    rt_col = _col(df, "retweet_count", "retweets")
+    reply_col = _col(df, "reply_count", "replies")
+
+    if id_col:
+        df = df.drop_duplicates(subset=[id_col])
+    if exclude_retweets:
+        df = df[~df[text_col].str.startswith("RT @")]
+    keywords = [k.strip().lower() for k in keywords if k.strip()]
+
+    records = []
+    for _, row in df.iterrows():
+        text = row[text_col].strip()
+        hit = [k for k in keywords if k in normalize_text(text).lower()] if keywords else ["(semua)"]
+        if not hit:
+            continue
+        tanggal = _parse_date(row[date_col]) if date_col else ""
+        if start and end and tanggal[:10] and not (f"{start}" <= tanggal[:10] <= f"{end}"):
+            continue
+        url = row[url_col] if url_col else ""
+        if not url and user_col and id_col:
+            url = f"https://x.com/{row[user_col]}/status/{row[id_col]}"
+        records.append({
+            "tanggal": tanggal,
+            "username": row[user_col] if user_col else "",
+            "isi_teks": text,
+            "keyword": ", ".join(hit),
+            "suka": row[like_col] if like_col else "",
+            "retweet": row[rt_col] if rt_col else "",
+            "balasan": row[reply_col] if reply_col else "",
+            "url": url,
+        })
+    return records

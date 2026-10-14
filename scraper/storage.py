@@ -33,6 +33,7 @@ def env_token():
 
 
 def safe_filename(name, default="data"):
+    name = re.sub(r"\.(csv|xlsx|json)$", "", name.strip(), flags=re.I)
     name = re.sub(r"[^\w\-]+", "_", name.strip()).strip("_")
     return name or default
 
@@ -48,9 +49,9 @@ def save(df, path, fmt):
         df.to_json(path, orient="records", force_ascii=False, indent=2)
 
 
-def load_existing(path, fmt):
+def load_existing(path, fmt, columns=COLUMNS):
     if not path.exists():
-        return pd.DataFrame(columns=COLUMNS)
+        return pd.DataFrame(columns=columns)
     if fmt == "csv":
         return pd.read_csv(path, dtype=str).fillna("")
     if fmt == "xlsx":
@@ -58,15 +59,15 @@ def load_existing(path, fmt):
     return pd.read_json(path, dtype=False).fillna("")
 
 
-def merge_and_save(records, path, fmt, append=False):
+def merge_and_save(records, path, fmt, append=False, columns=COLUMNS, dedupe=("url", "isi_teks")):
     """Gabungkan record (dan isi file lama jika append), buang duplikat, simpan.
     Return (DataFrame akhir, jumlah data baru)."""
-    df = pd.DataFrame(records, columns=COLUMNS)
+    df = pd.DataFrame(records, columns=columns)
     n_before = 0
     if append:
-        old = load_existing(path, fmt)
+        old = load_existing(path, fmt, columns)
         n_before = len(old)
         df = pd.concat([old, df], ignore_index=True).fillna("")
-    df = df.drop_duplicates(subset=["url", "isi_teks"]).sort_values("tanggal").reset_index(drop=True)
+    df = df.drop_duplicates(subset=list(dedupe)).sort_values("tanggal").reset_index(drop=True)
     save(df, path, fmt)
     return df, len(df) - n_before
