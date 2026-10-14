@@ -2,18 +2,16 @@
 
 Jalankan:  streamlit run app.py
 """
-import json
-import math
 from collections import deque
 from datetime import date, timedelta
 
 import pandas as pd
 import streamlit as st
 
-from kumpul_per_kejadian import PROGRESS_FILE, count_rows, load_progress, months_back, out_path, run_once
+from kumpul_per_kejadian import out_path, run_once
 from scraper import detik, twitter
 from scraper.runner import COLUMNS, run
-from scraper.storage import OUTPUT_DIR, RAW_TWEET_DIR, env_token, load_existing, merge_and_save, safe_filename, save
+from scraper.storage import OUTPUT_DIR, RAW_TWEET_DIR, env_token, merge_and_save, safe_filename, save
 
 
 def valid_range(rentang):
@@ -242,137 +240,98 @@ def tab_tweet():
     show_result(records, out_path, fmt, key="dl_tweet", append=append)
 
 
-# ============================================================================ tab per topik
-def tab_kejadian():
-    st.caption("Mengumpulkan tweet ke file terpisah per topik. Nama topik yang Anda isi menjadi nama file: "
-               "`data_tweet<NamaTopik>.csv`. Menjalankan ulang dengan nama yang sama akan menambah data ke file itu.")
+# ============================================================================ tab pengaturan scraping
+def tab_scraping():
+    st.caption("Kumpulkan tweet X berdasarkan kata kunci, jumlah, dan rentang tanggal. "
+               "Menjalankan ulang dengan nama file yang sama akan menambah data ke file itu (duplikat dibuang).")
 
-    existing = sorted(OUTPUT_DIR.glob("data_tweet*.csv"))
-    if existing:
-        st.write("**File topik yang sudah ada:**")
-        st.dataframe(pd.DataFrame({"file": [p.name for p in existing],
-                                   "jumlah_data": [len(load_existing(p, "csv")) for p in existing]}),
-                     width="stretch", hide_index=True)
+    with st.form("form_scraping"):
+        saved_token = env_token()
+        token = st.text_input(
+            "🔑 X Auth Token" + (" (kosongkan untuk memakai token dari .env)" if saved_token else ""),
+            type="password", key="token_scraping",
+            help="Token ini digunakan untuk mengotentikasi permintaan scraping ke X (sebelumnya Twitter). "
+                 "Cookie `auth_token` dari x.com, atau simpan di .env sebagai X_AUTH_TOKEN=...")
+        if saved_token:
+            st.caption("✅ Token dari file .env terdeteksi.")
+        keywords = st.text_input("🔍 Kata Kunci Pencarian", key="kw_scraping", placeholder="contoh: jakarta",
+                                 help="Pisahkan dengan koma untuk beberapa kata kunci (digabung OR).")
 
-    # Radio mode ditaruh DI LUAR form: form baru render ulang saat submit, jadi kalau radio ini
-    # ada di dalam form, field "tahun"/"metode tanggal" (khusus mode bulanan) tidak akan sempat
-    # terlihat sebelum form disubmit.
-    mode = st.radio("Mode pengambilan", ["terbaru", "bulanan"], horizontal=True, key="mode_kejadian",
-                    help="terbaru: tweet TERBARU tanpa filter tanggal (untuk semua akun). "
-                         "bulanan: sebar per bulan selama N tahun, BUTUH akun yang bisa memakai "
-                         "filter tanggal since:/until: di X.")
-
-    with st.form("form_kejadian"):
         c1, c2 = st.columns(2)
-        with c1:
-            saved_token = env_token()
-            token = st.text_input(
-                "Auth token X" + (" (kosongkan untuk memakai token dari .env)" if saved_token else ""),
-                type="password", key="token_kejadian",
-                help="Cookie `auth_token` dari x.com. Bisa juga disimpan di file .env sebagai X_AUTH_TOKEN=...")
-            if saved_token:
-                st.caption("✅ Token dari file .env terdeteksi.")
-            topik = st.text_input("Nama topik / file", placeholder="contoh: Pemilu, Banjir, Harga_BBM",
-                                  help="Menjadi nama file hasil: data_tweet<NamaTopik>.csv")
-            keywords = st.text_input("Keyword (pisahkan dengan koma)", key="kw_kejadian",
-                                     placeholder="contoh: pemilu, pilpres",
-                                     help="Digabung dengan OR di pencarian X. Kosong = pakai nama topik.")
-            target = st.number_input("Target jumlah data", 100, 50000, 2000, step=100)
-        with c2:
-            if mode == "bulanan":
-                tahun = st.number_input("Berapa tahun ke belakang", 1, 10, 5)
-                date_mode_label = st.selectbox(
-                    "Metode filter tanggal", list(twitter.DATE_MODES.keys())[1:],  # tanpa opsi "none"
-                    help="Kalau hasil 0, coba metode lain.")
-            lang = st.selectbox("Bahasa", ["id", "semua"], key="lang_kejadian")
+        jumlah = c1.number_input("📊 Jumlah Tweet", 10, 50000, 1000, step=100)
+        nama = c2.text_input("📄 Nama File Output", value="data_tweet", key="nama_scraping",
+                             help="Tanpa ekstensi juga boleh. Disimpan di folder hasil/.")
 
-        submitted = st.form_submit_button("Mulai kumpulkan", type="primary")
+        c3, c4 = st.columns(2)
+        mulai = c3.date_input("📅 Tanggal Mulai", value=None, max_value=date.today(), format="DD/MM/YYYY",
+                              key="mulai_scraping", help="Kosongkan untuk mengambil tweet terbaru tanpa filter tanggal.")
+        akhir = c4.date_input("📅 Tanggal Akhir", value=None, max_value=date.today(), format="DD/MM/YYYY",
+                              key="akhir_scraping", help="Kosongkan untuk memakai hari ini.")
+
+        fmt = st.selectbox("⬇️ Format Ekspor", ["csv", "xlsx", "json"], key="fmt_scraping",
+                           format_func=lambda f: {"csv": "CSV (Comma Separated Values)",
+                                                  "xlsx": "XLSX (Excel)", "json": "JSON"}[f],
+                           help="Pilih format file untuk menyimpan dan mengunduh hasil scraping.")
+
+        with st.expander("Pengaturan lanjutan"):
+            a1, a2 = st.columns(2)
+            lang = a1.selectbox("Bahasa", ["id", "semua"], key="lang_scraping")
+            exclude_rt = a2.checkbox("Tanpa retweet", value=True, key="rt_scraping")
+            date_mode_label = st.selectbox(
+                "Metode filter tanggal", list(twitter.DATE_MODES.keys())[1:], key="dm_scraping",
+                help="Dipakai hanya jika Tanggal Mulai diisi. Kalau hasil 0, coba metode lain.")
+
+        submitted = st.form_submit_button("Mulai scraping", type="primary")
 
     if not submitted:
         return
     token = token.strip() or saved_token
     if not token:
-        st.error("Masukkan auth token X, atau isi X_AUTH_TOKEN di file .env.")
+        st.error("Masukkan X Auth Token, atau isi X_AUTH_TOKEN di file .env.")
         return
-    if not topik.strip():
-        st.error("Isi nama topik.")
+    kw_list = [k.strip() for k in keywords.split(",") if k.strip()]
+    if not kw_list:
+        st.error("Isi kata kunci pencarian.")
         return
-    event = safe_filename(topik, "topik")
-    kw_list = [k.strip() for k in keywords.split(",") if k.strip()] or [topik.strip()]
-    lang_code = "" if lang == "semua" else lang
-    fmt = "csv"
-    st.write(f"**Topik:** {event} · **Keyword:** {', '.join(kw_list)} · **File:** `{out_path(event, fmt).name}`")
+    end = akhir or date.today()
+    start = mulai or end
+    if start > end:
+        st.error("Tanggal mulai tidak boleh setelah tanggal akhir.")
+        return
+    date_mode = twitter.DATE_MODES[date_mode_label] if mulai else "none"
+    path = out_path(nama, fmt)
+    st.write(f"**Kata kunci:** {', '.join(kw_list)} · **Jumlah:** {int(jumlah)} · **File:** `{path.name}`")
+    if date_mode == "none":
+        st.info("Tanpa filter tanggal, X hanya memberikan tweet TERBARU (beberapa hari ke belakang).")
+    st.caption("Run pertama akan mengunduh tweet-harvest dan Chromium (bisa beberapa menit). "
+               "Jangan tutup tab ini selama proses berjalan.")
 
-    if mode == "bulanan":
-        st.info("Sebelum lanjut: cek dulu di kotak pencarian x.com apakah query dengan filter tanggal "
-                "menampilkan hasil untuk akun ini. Kalau tidak, pilih mode 'terbaru' saja.")
-        months = months_back(int(tahun))
-        per_run = math.ceil(target * 1.3 / len(months))
-        date_mode = twitter.DATE_MODES[date_mode_label]
-        progress = load_progress()
-
-    overall = st.progress(0.0)
-    status = st.empty()
     log_box = st.empty()
-    summary = st.container()
-
-    if mode == "terbaru":
-        have = count_rows(event, fmt)
-        if have >= target:
-            status.text(f"[{event}] sudah {have} data (target {target}), dilewati.")
-        else:
-            limit = math.ceil((target - have) * 1.3)
-            log = deque(maxlen=12)
-            n_new = 0
-            for item in run_once(token, event, kw_list, lang_code, limit, date.today(), date.today(),
-                                 "none", f"raw_{event}_terbaru", fmt):
+    log = deque(maxlen=12)
+    result = None
+    with st.spinner("tweet-harvest sedang berjalan..."):
+        try:
+            for item in run_once(token, kw_list, "" if lang == "semua" else lang, int(jumlah), start, end,
+                                 date_mode, nama, fmt, exclude_rt):
                 if item[0] == "log":
                     log.append(item[1])
                     log_box.code("\n".join(log))
                 else:
-                    n_new = item[1]
-            status.text(f"[{event}] +{n_new} baru, total {count_rows(event, fmt)}")
-        overall.progress(1.0)
-
-    else:  # bulanan
-        done = set(progress.get(event, []))
-        empty_streak = 0
-        for step, (start, end) in enumerate(months, 1):
-            key = f"{start:%Y-%m}"
-            if key in done:
-                overall.progress(step / len(months))
-                continue
-            status.text(f"[{event} {key}] mengambil ±{per_run} tweet...")
-            raw_name = f"raw_{event}_{start:%Y%m}"
-            log = deque(maxlen=12)
-            n_new = 0
-            for item in run_once(token, event, kw_list, lang_code, per_run, start, end,
-                                 date_mode, raw_name, fmt):
-                if item[0] == "log":
-                    log.append(item[1])
-                    log_box.code("\n".join(log))
-                else:
-                    n_new = item[1]
-            overall.progress(step / len(months))
-            empty_streak = empty_streak + 1 if n_new == 0 else 0
-            if n_new > 0:
-                done.add(key)
-                progress[event] = sorted(done)
-                PROGRESS_FILE.write_text(json.dumps(progress, indent=2), encoding="utf-8")
-            if empty_streak >= 3:
-                st.error("3 bulan berturut-turut 0 tweet. Kemungkinan filter tanggal diblokir untuk akun "
-                         "ini atau kena rate limit. Bulan yang sudah selesai tidak akan diulang; "
-                         "jalankan lagi nanti untuk melanjutkan.")
-                break
-
+                    result = item
+        except RuntimeError as e:
+            st.error(str(e))
+            return
     log_box.empty()
-    status.empty()
-    with summary:
-        p = out_path(event, fmt)
-        st.success(f"Proses selesai: {count_rows(event, fmt)} data di {p.name}")
-        if p.exists():
-            st.dataframe(load_existing(p, fmt).drop(columns=["isi_teks"]).tail(20), width="stretch")
-            st.download_button(f"Unduh {p.name}", p.read_bytes(), file_name=p.name, key=f"dl_{event}")
+
+    if result is None or result[2] is None:
+        st.error("Tidak ada tweet (0 data). Coba kata kunci lain, rentang tanggal lebih panjang, "
+                 "atau metode filter tanggal lain. Cek token jika terus gagal.")
+        st.caption(f"Log tersimpan di: {RAW_TWEET_DIR}")
+        return
+    _, n_new, df, path = result
+    st.success(f"{n_new} tweet baru, total {len(df)} data di: {path}")
+    st.dataframe(df, width="stretch")
+    st.download_button(f"Unduh {path.name}", path.read_bytes(), file_name=path.name, key="dl_scraping")
 
 
 # ============================================================================ halaman
@@ -380,10 +339,10 @@ st.set_page_config(page_title="Scraper Data", page_icon="🔎", layout="wide")
 st.title("Scraper Data Berita & Tweet X")
 st.caption("Kolom lokasi diisi otomatis berbasis aturan, jadi validasi manual tetap diperlukan.")
 
-tab1, tab2, tab3 = st.tabs(["📰 Berita (Detik, Kompas, BMKG)", "🐦 Tweet X", "📦 Tweet per Topik"])
+tab1, tab2, tab3 = st.tabs(["📰 Berita (Detik, Kompas, BMKG)", "🐦 Tweet X", "⚙️ Pengaturan Scraping"])
 with tab1:
     tab_berita()
 with tab2:
     tab_tweet()
 with tab3:
-    tab_kejadian()
+    tab_scraping()

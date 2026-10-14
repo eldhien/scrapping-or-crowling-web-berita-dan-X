@@ -50,7 +50,8 @@ Memakai [tweet-harvest](https://github.com/helmisatria/tweet-harvest) v2.7.1. Bu
 - **Upload CSV**: untuk CSV yang dibuat dengan menjalankan tweet-harvest sendiri di terminal.
 - Data mentah disimpan di `hasil/raw_tweets/tweets-data/`, data olahan di `hasil/<nama_file>`.
 - Kolom `judul` berisi `@username`. Retweet dibuang, dan slang umum ("yg", "gak", "udh") dinormalisasi hanya untuk deteksi lokasi.
-- **Tab "Tweet per Topik"**: isi nama topik, hasil disimpan ke `hasil/data_tweet<NamaTopik>.csv`.
+- **Tab "Pengaturan Scraping"**: isi X Auth Token, kata kunci, jumlah tweet, nama file, tanggal mulai/akhir (opsional), dan format. Hasil disimpan ke `hasil/<nama_file>.<format>` dengan kolom umum: `tanggal, username, isi_teks, keyword, suka, retweet, balasan, url`.
+- Via terminal: `python kumpul_per_kejadian.py --keyword "jakarta" --jumlah 1000 --nama jakarta --mulai 2025-10-08`.
 - Pakai **akun cadangan**. Scraping X melanggar ToS X dan akun bisa dibatasi.
 
 ### Token di file `.env` & pengambilan rutin
