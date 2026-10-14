@@ -223,6 +223,11 @@ def tab_tweet():
         elif "allOfTheseWords" in full_log:
             st.error("tweet-harvest gagal membuka form Advanced Search X. Kemungkinan token tidak valid, "
                      "atau tampilan X sudah berubah sehingga tweet-harvest perlu diperbarui.")
+        elif mode_code != "none" and end < date.today() - timedelta(days=1):
+            st.error(f"0 tweet untuk {start:%d-%m-%Y} s.d. {end:%d-%m-%Y}. Akun ini hanya mendapat tweet dari "
+                     "beberapa hari terakhir dari pencarian X, jadi rentang yang berakhir di masa lalu hasilnya kosong "
+                     "walau query-nya valid. Atur tanggal akhir ke HARI INI (atau pilih 'Tanpa filter tanggal'), "
+                     "lalu jalankan rutin tiap hari dengan opsi 'Gabungkan ke file yang sudah ada'.")
         else:
             st.error("tweet-harvest selesai tanpa tweet (0 data). Coba rentang waktu lebih panjang atau keyword lain.")
         with st.expander("Log lengkap tweet-harvest"):
